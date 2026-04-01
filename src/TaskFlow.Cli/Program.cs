@@ -154,7 +154,7 @@ internal static class Program
 
     private static CodexProviderOptions LoadCodexOptions(string repositoryRoot)
     {
-        var appSettingsPath = Path.Combine(repositoryRoot, "src", "TaskFlow.Cli", "appsettings.json");
+        var appSettingsPath = ResolveAppSettingsPath(repositoryRoot);
         var configuration = new ConfigurationBuilder()
             .SetBasePath(Path.GetDirectoryName(appSettingsPath)!)
             .AddJsonFile(Path.GetFileName(appSettingsPath), optional: false, reloadOnChange: false)
@@ -165,6 +165,28 @@ internal static class Program
             .Get<CodexProviderOptions>();
 
         return CodexConfigurationValidator.Validate(options, repositoryRoot);
+    }
+
+    private static string ResolveAppSettingsPath(string repositoryRoot)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "appsettings.json"),
+            Path.Combine(repositoryRoot, "src", "TaskFlow.Cli", "appsettings.json"),
+            Path.Combine(repositoryRoot, "appsettings.json")
+        };
+
+        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException(
+            "Could not locate appsettings.json. Place it next to TaskFlow.Cli.exe or run TaskFlow from the repository root.",
+            Path.Combine(AppContext.BaseDirectory, "appsettings.json"));
     }
 
     private static string ResolveRepositoryRoot()
