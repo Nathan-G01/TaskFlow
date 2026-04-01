@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/Contributing/" />
+  <Folder Name="/src/">
+    <Project Path="src/TaskFlow.Agents/TaskFlow.Agents.csproj" />
+    <Project Path="src/TaskFlow.Cli/TaskFlow.Cli.csproj" />
+    <Project Path="src/TaskFlow.Providers/TaskFlow.Providers.Abstraction/TaskFlow.Providers.Abstraction.csproj" />
+    <Project Path="src/TaskFlow.Providers/TaskFlow.Providers.Codex/TaskFlow.Providers.Codex.csproj" />
+  </Folder>
+</Solution>

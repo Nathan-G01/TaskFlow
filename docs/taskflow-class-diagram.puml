@@ -1,0 +1,177 @@
+@startuml
+title TaskFlow Class Diagram
+
+hide empty members
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+
+package "TaskFlow.Cli" {
+  class Program
+  class ProviderRegistry
+  class ProviderOptions
+}
+
+package "TaskFlow.Agents" {
+  interface IOrchestrator
+  interface ISupervisor
+  interface IAgent
+  interface IAgentFactory
+  interface IRunContextStore
+  interface ITaskLogger
+
+  class Orchestrator
+  class Supervisor
+  class Agent
+  class AgentFactory
+  class MarkdownRunContextStore
+  class FileConsoleTaskLogger
+
+  class RunContext
+  class RunFilesOptions
+  class OrchestrationResult
+  class TaskLogEntry
+}
+
+package "Providers.Abstraction.Core" {
+  class TaskAssignment
+  class TaskResult
+  class SupervisorTaskDecision
+  class TaskReview
+  class TaskHistoryEntry
+  class SupervisorContext
+  class EngineStatus
+}
+
+package "Providers.Abstraction.Engines" {
+  interface IEngine
+  interface ISupervisorEngine
+}
+
+package "Providers.Abstraction.Factories" {
+  interface IAgentEngineFactory
+  interface ISupervisorEngineFactory
+}
+
+package "Providers.Abstraction.Protocol" {
+  interface IProviderProtocol
+  class JsonProviderProtocol
+  class ProviderProtocolMapper
+  class ProviderPromptFactory
+  class ProviderProtocolException
+}
+
+package "TaskFlow.Providers.Codex" {
+  class CodexSupervisorEngine
+  class CodexAgentEngine
+  class CodexEngineFactory
+  class CodexCliClient
+  class CodexProviderOptions
+  class CodexRoleOptions
+}
+
+Program --> ProviderRegistry
+Program --> RunFilesOptions
+Program --> Orchestrator
+Program --> ProviderOptions
+
+ProviderRegistry --> IAgentEngineFactory
+ProviderRegistry --> ISupervisorEngineFactory
+ProviderRegistry --> CodexEngineFactory
+Program --> CodexProviderOptions
+
+Orchestrator ..|> IOrchestrator
+Supervisor ..|> ISupervisor
+Agent ..|> IAgent
+AgentFactory ..|> IAgentFactory
+MarkdownRunContextStore ..|> IRunContextStore
+FileConsoleTaskLogger ..|> ITaskLogger
+
+Orchestrator --> ISupervisor
+Orchestrator --> IRunContextStore
+Orchestrator --> IAgentFactory
+Orchestrator --> ITaskLogger
+Orchestrator --> RunContext
+Orchestrator --> OrchestrationResult
+Orchestrator --> TaskHistoryEntry
+
+Supervisor --> ISupervisorEngine
+Supervisor --> RunContext
+Supervisor --> SupervisorContext
+Supervisor --> SupervisorTaskDecision
+Supervisor --> TaskReview
+
+AgentFactory --> IAgent
+AgentFactory --> IAgentEngineFactory
+Agent --> IEngine
+Agent --> TaskAssignment
+Agent --> TaskResult
+
+MarkdownRunContextStore --> RunFilesOptions
+MarkdownRunContextStore --> RunContext
+MarkdownRunContextStore --> TaskHistoryEntry
+
+FileConsoleTaskLogger --> TaskLogEntry
+
+IEngine --> TaskAssignment
+IEngine --> TaskResult
+ISupervisorEngine --> SupervisorContext
+ISupervisorEngine --> SupervisorTaskDecision
+ISupervisorEngine --> TaskAssignment
+ISupervisorEngine --> TaskResult
+ISupervisorEngine --> TaskReview
+
+IAgentEngineFactory --> IEngine
+ISupervisorEngineFactory --> ISupervisorEngine
+
+JsonProviderProtocol ..|> IProviderProtocol
+ProviderProtocolMapper --> TaskAssignment
+ProviderProtocolMapper --> TaskResult
+ProviderProtocolMapper --> SupervisorTaskDecision
+ProviderProtocolMapper --> TaskReview
+ProviderProtocolMapper --> TaskHistoryEntry
+ProviderPromptFactory --> IProviderProtocol
+JsonProviderProtocol --> ProviderProtocolException
+
+CodexSupervisorEngine ..|> ISupervisorEngine
+CodexAgentEngine ..|> IEngine
+CodexSupervisorEngine --> IProviderProtocol
+CodexAgentEngine --> IProviderProtocol
+CodexSupervisorEngine --> JsonProviderProtocol
+CodexAgentEngine --> JsonProviderProtocol
+CodexSupervisorEngine --> ProviderProtocolMapper
+CodexAgentEngine --> ProviderProtocolMapper
+CodexSupervisorEngine --> ProviderPromptFactory
+CodexAgentEngine --> ProviderPromptFactory
+CodexSupervisorEngine --> CodexCliClient
+CodexAgentEngine --> CodexCliClient
+CodexEngineFactory --> CodexProviderOptions
+CodexProviderOptions --> CodexRoleOptions
+
+CodexEngineFactory ..|> IAgentEngineFactory
+CodexEngineFactory ..|> ISupervisorEngineFactory
+CodexEngineFactory --> CodexSupervisorEngine
+CodexEngineFactory --> CodexAgentEngine
+
+RunContext --> TaskHistoryEntry
+OrchestrationResult --> RunContext
+OrchestrationResult --> TaskHistoryEntry
+
+note right of Orchestrator
+Coordinates the runtime loop:
+1. load context
+2. ask supervisor for next task
+3. run agent
+4. ask supervisor for review
+5. persist progress
+6. log lifecycle events
+end note
+
+note bottom of CodexCliClient
+Invokes `codex exec` with:
+- strict JSON schema
+- single-shot prompts
+- role-specific sandbox
+- captured final message file
+end note
+
+@enduml

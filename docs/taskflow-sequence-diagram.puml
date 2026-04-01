@@ -1,0 +1,114 @@
+@startuml
+title TaskFlow Runtime Sequence
+
+actor User
+participant "Program" as Program
+participant "ProviderRegistry" as Registry
+participant "Orchestrator" as Orchestrator
+participant "MarkdownRunContextStore" as Store
+participant "FileConsoleTaskLogger" as Logger
+participant "Supervisor" as Supervisor
+participant "CodexSupervisorEngine" as SupervisorEngine
+participant "AgentFactory" as AgentFactory
+participant "Agent" as Agent
+participant "CodexAgentEngine" as AgentEngine
+participant "CodexCliClient" as CodexCli
+database "plan.md" as Plan
+database "progress.md" as Progress
+database "taskflow.log" as TaskLog
+database "appsettings.json" as AppSettings
+
+User -> Program : run CLI
+Program -> AppSettings : load Codex config
+AppSettings --> Program : provider options
+Program -> Registry : resolve supervisor provider
+Registry --> Program : ISupervisorEngineFactory
+Program -> Registry : resolve agent provider
+Registry --> Program : IAgentEngineFactory
+Program -> Orchestrator : create(supervisor, store, agentFactory, logger)
+
+Program -> Orchestrator : RunAsync()
+Orchestrator -> Store : LoadAsync()
+Store -> Plan : read
+Plan --> Store : plan markdown
+Store -> Progress : read if exists
+Progress --> Store : reviewed task history
+Store --> Orchestrator : RunContext
+
+Orchestrator -> Logger : log(run-start)
+Logger -> TaskLog : append
+
+loop until complete or invalidated
+  Orchestrator -> Supervisor : CreateNextTaskAsync(context)
+  Supervisor -> SupervisorEngine : CreateNextTaskAsync(supervisorContext)
+  SupervisorEngine -> SupervisorEngine : build CreateNextTaskRequest JSON
+  SupervisorEngine -> SupervisorEngine : generate prompt
+  SupervisorEngine -> CodexCli : codex exec (read-only)
+  CodexCli --> SupervisorEngine : final JSON message
+  SupervisorEngine -> SupervisorEngine : parse strict JSON response
+  SupervisorEngine --> Supervisor : SupervisorTaskDecision
+  Supervisor --> Orchestrator : decision
+
+  alt decision is complete
+    Orchestrator -> Logger : log(run-complete)
+    Logger -> TaskLog : append
+    Orchestrator --> Program : OrchestrationResult
+  else task proposed
+    Orchestrator -> Logger : log(task-proposed)
+    Logger -> TaskLog : append
+
+    Orchestrator -> AgentFactory : CreateAgent()
+    AgentFactory -> AgentEngine : CreateEngine()
+    AgentEngine --> AgentFactory : IEngine
+    AgentFactory --> Orchestrator : Agent
+
+    Orchestrator -> Logger : log(task-dispatched)
+    Logger -> TaskLog : append
+
+    Orchestrator -> Agent : ExecuteAsync(task)
+    Agent -> AgentEngine : ExecuteAsync(task)
+    AgentEngine -> AgentEngine : build ExecuteTaskRequest JSON
+    AgentEngine -> AgentEngine : generate prompt
+    AgentEngine -> CodexCli : codex exec (workspace-write)
+    CodexCli --> AgentEngine : final JSON message
+    AgentEngine -> AgentEngine : parse strict JSON response
+    AgentEngine --> Agent : TaskResult
+    Agent --> Orchestrator : TaskResult
+
+    Orchestrator -> Logger : log(task-completed)
+    Logger -> TaskLog : append
+
+    Orchestrator -> Supervisor : ReviewTaskAsync(context, task, result)
+    Supervisor -> SupervisorEngine : ReviewTaskAsync(supervisorContext, task, result)
+    SupervisorEngine -> SupervisorEngine : build ReviewTaskRequest JSON
+    SupervisorEngine -> SupervisorEngine : generate prompt
+    SupervisorEngine -> CodexCli : codex exec (read-only)
+    CodexCli --> SupervisorEngine : final JSON message
+    SupervisorEngine -> SupervisorEngine : parse strict JSON response
+    SupervisorEngine --> Supervisor : TaskReview
+    Supervisor --> Orchestrator : TaskReview
+
+    Orchestrator -> Logger : log(task-reviewed)
+    Logger -> TaskLog : append
+
+    Orchestrator -> Store : AppendHistoryAsync(reviewed task entry)
+    Store -> Progress : append markdown section
+    Progress --> Store : ok
+    Store --> Orchestrator : ok
+
+    Orchestrator -> Logger : log(task-persisted)
+    Logger -> TaskLog : append
+
+    alt review invalidated or protocol error
+      Orchestrator -> Logger : log(run-stopped)
+      Logger -> TaskLog : append
+      Orchestrator --> Program : OrchestrationResult
+    else review validated
+      Orchestrator -> Orchestrator : update RunContext with reviewed entry
+    end
+  end
+end
+
+Program --> User : exit code + summary
+
+@enduml
