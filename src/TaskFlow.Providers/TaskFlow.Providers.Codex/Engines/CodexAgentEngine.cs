@@ -22,11 +22,12 @@ public sealed class CodexAgentEngine : IEngine
 
     public EngineStatus Status => new("Codex", true, 128000, 0, $"Model={_options.Model ?? "default"}, Sandbox={_options.Sandbox}");
 
-    public async ValueTask<TaskResult> ExecuteAsync(TaskAssignment assignment, CancellationToken cancellationToken = default)
+    public async ValueTask<TaskResult> ExecuteAsync(AgentContext context, TaskAssignment assignment, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(assignment);
 
-        var request = ProviderProtocolMapper.ToExecuteTaskRequest(assignment);
+        var request = ProviderProtocolMapper.ToExecuteTaskRequest(context, assignment);
         var prompt = ProviderPromptFactory.ExecuteTaskPrompt(request, _protocol);
         var cliResult = await _client.ExecuteAsync(prompt, CodexSchemaFactory.ExecuteTaskResponseSchema, _options, "execute-task", cancellationToken);
         var response = _protocol.ParseExecuteTaskResponse(cliResult.FinalMessage);

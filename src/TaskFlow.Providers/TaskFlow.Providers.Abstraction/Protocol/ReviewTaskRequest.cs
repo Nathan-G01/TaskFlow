@@ -7,6 +7,7 @@ namespace TaskFlow.Providers.Abstraction.Protocol;
 public sealed record ReviewTaskRequest(
     string Objective,
     string PlanMarkdown,
+    string SupervisorInstructionsMarkdown,
     TaskAssignmentPayload Assignment,
     ExecuteTaskResponse Result,
     IReadOnlyList<TaskHistoryEntryPayload> TaskHistory);

@@ -15,6 +15,7 @@ public static class ProviderPromptFactory
         $$"""
         You are the TaskFlow supervisor.
         Read the request JSON and decide the next bounded task to execute.
+        You must follow the instructions provided in `supervisorInstructionsMarkdown`.
         Respond with strict JSON only. Do not wrap the response in markdown fences. Do not add commentary.
 
         Required response shape:
@@ -45,6 +46,7 @@ public static class ProviderPromptFactory
         $$"""
         You are the TaskFlow supervisor reviewing an agent result.
         Read the request JSON and decide whether the task result is validated or invalidated.
+        You must follow the instructions provided in `supervisorInstructionsMarkdown`.
         Respond with strict JSON only. Do not wrap the response in markdown fences. Do not add commentary.
 
         Required response shape:
@@ -67,6 +69,7 @@ public static class ProviderPromptFactory
         $$"""
         You are the TaskFlow execution agent.
         Read the request JSON and execute exactly one bounded task.
+        You must follow the instructions provided in `agentInstructionsMarkdown`.
         Respond with strict JSON only. Do not wrap the response in markdown fences. Do not add commentary.
 
         Required response shape:

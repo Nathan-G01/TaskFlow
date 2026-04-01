@@ -30,7 +30,8 @@ internal static class Program
                 new Supervisor(supervisorEngineFactory.CreateEngine()),
                 new MarkdownRunContextStore(options),
                 new AgentFactory(agentEngineFactory),
-                new FileConsoleTaskLogger(options.LogPath));
+                new FileConsoleTaskLogger(options.LogPath),
+                options.MaxAgentTrials);
 
             var result = await orchestrator.RunAsync();
 
@@ -51,7 +52,7 @@ internal static class Program
         catch (FileNotFoundException exception)
         {
             Console.Error.WriteLine(exception.Message);
-            Console.Error.WriteLine("Create a plan file before running TaskFlow. Expected files can be overridden with CLI arguments: <planPath> <progressPath> [--supervisor-provider <name>] [--agent-provider <name>].");
+            Console.Error.WriteLine("Create a plan file before running TaskFlow. Expected files can be overridden with CLI arguments: <planPath> <progressPath> [--supervisor-provider <name>] [--agent-provider <name>] [--max-agent-trials <count>].");
             Console.Error.WriteLine($"Missing path: {exception.FileName}");
             return 1;
         }
@@ -76,13 +77,15 @@ internal static class Program
             return new RunFilesOptions(
                 Path.GetFullPath(positionalArgs[0]),
                 Path.GetFullPath(positionalArgs[1]),
-                ResolveLogPath(repositoryRoot, args));
+                ResolveLogPath(repositoryRoot, args),
+                ResolveMaxAgentTrials(args));
         }
 
         return new RunFilesOptions(
             Path.Combine(repositoryRoot, "plan.md"),
             Path.Combine(repositoryRoot, "progress.md"),
-            ResolveLogPath(repositoryRoot, args));
+            ResolveLogPath(repositoryRoot, args),
+            ResolveMaxAgentTrials(args));
     }
 
     private static ProviderOptions CreateProviderOptions(string[] args)
@@ -119,7 +122,9 @@ internal static class Program
         {
             if (string.Equals(args[i], "--supervisor-provider", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(args[i], "--agent-provider", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(args[i], "--log-path", StringComparison.OrdinalIgnoreCase))
+                string.Equals(args[i], "--log-path", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(args[i], "--max-agent-trials", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(args[i], "--max-agent-trial", StringComparison.OrdinalIgnoreCase))
             {
                 i++;
                 continue;
@@ -132,6 +137,26 @@ internal static class Program
         }
 
         return positionalArgs.ToArray();
+    }
+
+    private static int ResolveMaxAgentTrials(string[] args)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if ((string.Equals(args[i], "--max-agent-trials", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(args[i], "--max-agent-trial", StringComparison.OrdinalIgnoreCase)) &&
+                i + 1 < args.Length)
+            {
+                if (!int.TryParse(args[i + 1], out var parsedValue) || parsedValue < 1)
+                {
+                    throw new InvalidOperationException("The value for --max-agent-trials must be an integer greater than or equal to 1.");
+                }
+
+                return parsedValue;
+            }
+        }
+
+        return 5;
     }
 
     private static string ResolveLogPath(string repositoryRoot, string[] args)

@@ -11,6 +11,7 @@ public static class ProviderProtocolMapper
         return new CreateNextTaskRequest(
             context.Objective,
             context.PlanMarkdown,
+            context.SupervisorInstructionsMarkdown,
             context.TaskHistory.Select(ToTaskHistoryEntryPayload).ToArray());
     }
 
@@ -52,6 +53,7 @@ public static class ProviderProtocolMapper
         return new ReviewTaskRequest(
             context.Objective,
             context.PlanMarkdown,
+            context.SupervisorInstructionsMarkdown,
             ToTaskAssignmentPayload(assignment),
             ToExecuteTaskResponse(result),
             context.TaskHistory.Select(ToTaskHistoryEntryPayload).ToArray());
@@ -69,11 +71,15 @@ public static class ProviderProtocolMapper
         return new TaskReview(response.TaskId, response.Status, response.Summary);
     }
 
-    public static ExecuteTaskRequest ToExecuteTaskRequest(TaskAssignment assignment)
+    public static ExecuteTaskRequest ToExecuteTaskRequest(AgentContext context, TaskAssignment assignment)
     {
+        ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(assignment);
 
         return new ExecuteTaskRequest(
+            context.Objective,
+            context.PlanMarkdown,
+            context.AgentInstructionsMarkdown,
             ToTaskAssignmentPayload(assignment),
             "Execute exactly one bounded task and respond with strict JSON only.");
     }

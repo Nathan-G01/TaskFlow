@@ -86,6 +86,28 @@ Do not treat `plan.md` as:
 - a checklist of tasks to consume in order
 - a reviewed execution ledger
 
+### `supervisor.md`
+
+`supervisor.md` lives beside `plan.md` and is injected into supervisor prompt construction.
+
+Use it for role-level planning and review rules such as:
+
+- task sizing
+- review strictness
+- completion criteria
+- repo-specific planning heuristics
+
+### `agent.md`
+
+`agent.md` lives beside `plan.md` and is injected into agent execution prompts.
+
+Use it for role-level execution rules such as:
+
+- edit expectations
+- coding constraints
+- validation expectations
+- repo-specific implementation guidance
+
 ### `progress.md`
 
 `progress.md` is append-only reviewed history. It is parsed by [`MarkdownRunContextStore`](c:/Users/NathanGaillard/0repos/PersonalProjects/TaskFlow/src/TaskFlow.Agents/Infrastructure/MarkdownRunContextStore.cs).

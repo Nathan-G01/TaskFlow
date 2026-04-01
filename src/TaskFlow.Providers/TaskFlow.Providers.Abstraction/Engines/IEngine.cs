@@ -9,5 +9,5 @@ public interface IEngine
 {
     EngineStatus Status { get; }
 
-    ValueTask<TaskResult> ExecuteAsync(TaskAssignment assignment, CancellationToken cancellationToken = default);
+    ValueTask<TaskResult> ExecuteAsync(AgentContext context, TaskAssignment assignment, CancellationToken cancellationToken = default);
 }

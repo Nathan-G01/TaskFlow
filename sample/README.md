@@ -10,6 +10,10 @@ This sample shows how to run TaskFlow against a simple goal: create a basic Pong
   Strategic plan for the supervisor.
 - `progress.md`
   Reviewed task ledger written by TaskFlow as the run advances.
+- `supervisor.md`
+  Role instructions for the supervisor provider.
+- `agent.md`
+  Role instructions for the execution agent provider.
 - `workspace/`
   Intended output area for the generated Python game.
 
@@ -37,6 +41,11 @@ From the repository root:
 ```powershell
 .\sample\bin\TaskFlow.Cli.exe .\sample\plan.md .\sample\progress.md --supervisor-provider codex --agent-provider codex --log-path .\sample\taskflow.log
 ```
+
+TaskFlow will also load:
+
+- `sample/supervisor.md`
+- `sample/agent.md`
 
 ## Expected Goal
 

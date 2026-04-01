@@ -7,4 +7,5 @@ namespace TaskFlow.Providers.Abstraction.Protocol;
 public sealed record CreateNextTaskRequest(
     string Objective,
     string PlanMarkdown,
+    string SupervisorInstructionsMarkdown,
     IReadOnlyList<TaskHistoryEntryPayload> TaskHistory);

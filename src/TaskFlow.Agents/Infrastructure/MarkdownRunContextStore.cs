@@ -21,10 +21,24 @@ public sealed class MarkdownRunContextStore : IRunContextStore
         }
 
         var planMarkdown = await File.ReadAllTextAsync(_options.PlanPath, cancellationToken);
+        var supervisorInstructionsPath = Path.Combine(Path.GetDirectoryName(_options.PlanPath) ?? Directory.GetCurrentDirectory(), "supervisor.md");
+        var agentInstructionsPath = Path.Combine(Path.GetDirectoryName(_options.PlanPath) ?? Directory.GetCurrentDirectory(), "agent.md");
+        if (!File.Exists(supervisorInstructionsPath))
+        {
+            throw new FileNotFoundException("TaskFlow supervisor instructions file was not found.", supervisorInstructionsPath);
+        }
+
+        if (!File.Exists(agentInstructionsPath))
+        {
+            throw new FileNotFoundException("TaskFlow agent instructions file was not found.", agentInstructionsPath);
+        }
+
+        var supervisorInstructionsMarkdown = await File.ReadAllTextAsync(supervisorInstructionsPath, cancellationToken);
+        var agentInstructionsMarkdown = await File.ReadAllTextAsync(agentInstructionsPath, cancellationToken);
         var objective = ExtractObjective(planMarkdown);
         var history = await LoadHistoryAsync(cancellationToken);
 
-        return new RunContext(objective, planMarkdown, history);
+        return new RunContext(objective, planMarkdown, supervisorInstructionsMarkdown, agentInstructionsMarkdown, history);
     }
 
     public async ValueTask AppendHistoryAsync(TaskHistoryEntry entry, CancellationToken cancellationToken = default)

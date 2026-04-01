@@ -4,6 +4,13 @@ TaskFlow is an orchestration loop for AI-supervised task execution.
 
 The supervisor reads `plan.md` and `progress.md`, creates the next bounded task, reviews the agent result, and decides whether the run can continue. The agent executes exactly one task at a time. The orchestrator connects both roles, persists reviewed history, and logs task lifecycle events.
 
+TaskFlow also expects two role instruction files beside `plan.md`:
+
+- `supervisor.md`
+- `agent.md`
+
+These files are injected into provider prompts and are part of the runtime contract.
+
 ## Core Loop
 
 1. Load strategic context from `plan.md`.
@@ -167,6 +174,15 @@ Run with explicit log path:
 
 ```bash
 dotnet run --project src/TaskFlow.Cli -- .\\plan.md .\\progress.md --supervisor-provider codex --agent-provider codex --log-path .\\taskflow.log
+```
+
+Required files beside `plan.md`:
+
+```text
+plan.md
+progress.md
+supervisor.md
+agent.md
 ```
 
 ## Structure

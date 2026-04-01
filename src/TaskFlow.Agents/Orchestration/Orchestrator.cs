@@ -15,14 +15,18 @@ public sealed class Orchestrator : IOrchestrator
     private readonly IRunContextStore _runContextStore;
     private readonly IAgentFactory _agentFactory;
     private readonly ITaskLogger _logger;
+    private readonly int _maxAgentTrials;
     private IAgent? _agent;
 
-    public Orchestrator(ISupervisor supervisor, IRunContextStore runContextStore, IAgentFactory agentFactory, ITaskLogger logger)
+    public Orchestrator(ISupervisor supervisor, IRunContextStore runContextStore, IAgentFactory agentFactory, ITaskLogger logger, int maxAgentTrials = 5)
     {
         _supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
         _runContextStore = runContextStore ?? throw new ArgumentNullException(nameof(runContextStore));
         _agentFactory = agentFactory ?? throw new ArgumentNullException(nameof(agentFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _maxAgentTrials = maxAgentTrials < 1
+            ? throw new ArgumentOutOfRangeException(nameof(maxAgentTrials), "Max agent trials must be at least 1.")
+            : maxAgentTrials;
     }
 
     public async ValueTask<OrchestrationResult> RunAsync(CancellationToken cancellationToken = default)
@@ -65,71 +69,107 @@ public sealed class Orchestrator : IOrchestrator
             var assignment = decision.Assignment
                 ?? throw new InvalidOperationException("Supervisor returned a non-complete decision without an assignment.");
             await LogAsync(TaskLogLevel.Information, "task-proposed", decision.Summary, assignment.Id, "Proposed", cancellationToken);
-            await LogAsync(TaskLogLevel.Information, "task-dispatched", $"Dispatching task '{assignment.Title}'.", assignment.Id, "Running", cancellationToken);
+            TaskResult? result = null;
+            TaskReview? review = null;
 
-            TaskResult result;
-            TaskReview review;
-
-            try
+            for (var attempt = 1; attempt <= _maxAgentTrials; attempt++)
             {
-                var execution = await ObserveOperationAsync(
-                    operation: token => GetAgent().ExecuteAsync(assignment, token),
-                    startEventType: "task-execution-start",
-                    startMessage: $"Agent started task '{assignment.Title}'.",
-                    runningEventType: "task-execution-running",
-                    runningMessageFactory: elapsed => $"Agent is still running task '{assignment.Title}'. Elapsed: {FormatElapsed(elapsed)}.",
-                    taskId: assignment.Id,
-                    status: "Running",
-                    cancellationToken: cancellationToken);
-                result = execution.Result;
-                await LogAsync(
-                    TaskLogLevel.Information,
-                    "task-completed",
-                    $"{result.Summary} Duration: {FormatElapsed(execution.Elapsed)}",
+                    await LogAsync(
+                        TaskLogLevel.Information,
+                        "task-dispatched",
+                        $"Dispatching task '{assignment.Title}'. Attempt {attempt} of {_maxAgentTrials}.",
                     assignment.Id,
-                    result.Status.ToString(),
+                    "Running",
                     cancellationToken);
-            }
-            catch (ProviderProtocolException exception)
-            {
-                result = new TaskResult(
-                    assignment.Id,
-                    TaskExecutionStatus.Failed,
-                    $"Agent protocol error: {exception.Message}",
-                    rawPayload: exception.ToString());
-                review = new TaskReview(assignment.Id, TaskValidationStatus.Invalidated, "Task invalidated because agent execution violated the strict JSON protocol.");
-                await LogAsync(TaskLogLevel.Error, "task-completed", result.Summary, assignment.Id, result.Status.ToString(), cancellationToken);
-                goto PersistReviewedTask;
+
+                try
+                {
+                    var execution = await ObserveOperationAsync(
+                        operation: token => GetAgent().ExecuteAsync(context, assignment, token),
+                        startEventType: "task-execution-start",
+                        startMessage: $"Agent started task '{assignment.Title}' on attempt {attempt} of {_maxAgentTrials}.",
+                        runningEventType: "task-execution-running",
+                        runningMessageFactory: elapsed => $"Agent is still running task '{assignment.Title}' on attempt {attempt} of {_maxAgentTrials}. Elapsed: {FormatElapsed(elapsed)}.",
+                        taskId: assignment.Id,
+                        status: "Running",
+                        cancellationToken: cancellationToken);
+                    result = execution.Result;
+                    await LogAsync(
+                        TaskLogLevel.Information,
+                        "task-completed",
+                        $"{result.Summary} Duration: {FormatElapsed(execution.Elapsed)} Attempt: {attempt}/{_maxAgentTrials}.",
+                        assignment.Id,
+                        result.Status.ToString(),
+                        cancellationToken);
+                }
+                catch (ProviderProtocolException exception)
+                {
+                    result = new TaskResult(
+                        assignment.Id,
+                        TaskExecutionStatus.Failed,
+                        $"Agent protocol error: {exception.Message}",
+                        rawPayload: exception.ToString());
+                    review = new TaskReview(assignment.Id, TaskValidationStatus.Invalidated, "Task invalidated because agent execution violated the strict JSON protocol.");
+                    await LogAsync(TaskLogLevel.Error, "task-completed", $"{result.Summary} Attempt: {attempt}/{_maxAgentTrials}.", assignment.Id, result.Status.ToString(), cancellationToken);
+                }
+
+                if (review is null)
+                {
+                    try
+                    {
+                        var reviewOperation = await ObserveOperationAsync(
+                            operation: token => _supervisor.ReviewTaskAsync(context, assignment, result!, token),
+                            startEventType: "task-review-start",
+                            startMessage: $"Supervisor started reviewing task '{assignment.Title}' on attempt {attempt} of {_maxAgentTrials}.",
+                            runningEventType: "task-review-running",
+                            runningMessageFactory: elapsed => $"Supervisor is still reviewing task '{assignment.Title}' on attempt {attempt} of {_maxAgentTrials}. Elapsed: {FormatElapsed(elapsed)}.",
+                            taskId: assignment.Id,
+                            status: "Running",
+                            cancellationToken: cancellationToken);
+                        review = reviewOperation.Result;
+                        await LogAsync(
+                            TaskLogLevel.Information,
+                            "task-reviewed",
+                            $"{review.Summary} Review duration: {FormatElapsed(reviewOperation.Elapsed)} Attempt: {attempt}/{_maxAgentTrials}.",
+                            assignment.Id,
+                            review.Status.ToString(),
+                            cancellationToken);
+                    }
+                    catch (ProviderProtocolException exception)
+                    {
+                        review = new TaskReview(assignment.Id, TaskValidationStatus.Invalidated, $"Supervisor review protocol error: {exception.Message}");
+                        await LogAsync(TaskLogLevel.Error, "task-reviewed", $"{review.Summary} Attempt: {attempt}/{_maxAgentTrials}.", assignment.Id, review.Status.ToString(), cancellationToken);
+                    }
+                }
+
+                if (review.Status == TaskValidationStatus.Validated)
+                {
+                    break;
+                }
+
+                if (attempt < _maxAgentTrials)
+                {
+                    await LogAsync(
+                        TaskLogLevel.Error,
+                        "task-retry-scheduled",
+                        $"Task '{assignment.Title}' was not validated on attempt {attempt} of {_maxAgentTrials}. Retrying.",
+                        assignment.Id,
+                        review.Status.ToString(),
+                        cancellationToken);
+                    review = null;
+                    continue;
+                }
             }
 
-            try
-            {
-                var reviewOperation = await ObserveOperationAsync(
-                    operation: token => _supervisor.ReviewTaskAsync(context, assignment, result, token),
-                    startEventType: "task-review-start",
-                    startMessage: $"Supervisor started reviewing task '{assignment.Title}'.",
-                    runningEventType: "task-review-running",
-                    runningMessageFactory: elapsed => $"Supervisor is still reviewing task '{assignment.Title}'. Elapsed: {FormatElapsed(elapsed)}.",
-                    taskId: assignment.Id,
-                    status: "Running",
-                    cancellationToken: cancellationToken);
-                review = reviewOperation.Result;
-                await LogAsync(
-                    TaskLogLevel.Information,
-                    "task-reviewed",
-                    $"{review.Summary} Review duration: {FormatElapsed(reviewOperation.Elapsed)}",
-                    assignment.Id,
-                    review.Status.ToString(),
-                    cancellationToken);
-            }
-            catch (ProviderProtocolException exception)
-            {
-                review = new TaskReview(assignment.Id, TaskValidationStatus.Invalidated, $"Supervisor review protocol error: {exception.Message}");
-                await LogAsync(TaskLogLevel.Error, "task-reviewed", review.Summary, assignment.Id, review.Status.ToString(), cancellationToken);
-                goto PersistReviewedTask;
-            }
+            result ??= new TaskResult(
+                assignment.Id,
+                TaskExecutionStatus.Failed,
+                "Task execution did not produce a result before retry exhaustion.");
+            review ??= new TaskReview(
+                assignment.Id,
+                TaskValidationStatus.Invalidated,
+                $"Task was not validated after {_maxAgentTrials} attempts.");
 
-        PersistReviewedTask:
             var entry = new TaskHistoryEntry(
                 assignment.Id,
                 DateTimeOffset.UtcNow,
