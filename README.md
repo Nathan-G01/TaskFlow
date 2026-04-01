@@ -182,3 +182,4 @@ The main architecture diagrams live in:
 
 - [`docs/taskflow-class-diagram.puml`](c:/Users/NathanGaillard/0repos/PersonalProjects/TaskFlow/docs/taskflow-class-diagram.puml)
 - [`docs/taskflow-sequence-diagram.puml`](c:/Users/NathanGaillard/0repos/PersonalProjects/TaskFlow/docs/taskflow-sequence-diagram.puml)
+- [`docs/roadmap.md`](c:/Users/NathanGaillard/0repos/PersonalProjects/TaskFlow/docs/roadmap.md)
