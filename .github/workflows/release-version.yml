@@ -1,0 +1,67 @@
+name: release-version
+
+on:
+  push:
+    branches:
+      - 'releases/**'
+
+jobs:
+  publish-windows-artifact:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve release version
+        id: version
+        shell: pwsh
+        run: |
+          $branchName = '${{ github.ref_name }}'
+          if ($branchName -notmatch '^releases/(?<version>v?\d+\.\d+\.\d+)$') {
+            throw "Release branches must be named releases/<semver> or releases/v<semver>. Current branch: $branchName"
+          }
+
+          $version = $Matches.version.TrimStart('v')
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Restore
+        run: dotnet restore TaskFlow.slnx
+
+      - name: Build
+        run: dotnet build TaskFlow.slnx -c Release --no-restore /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Publish CLI
+        shell: pwsh
+        run: >
+          dotnet publish .\src\TaskFlow.Cli\TaskFlow.Cli.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          --no-build
+          -o .\artifacts\publish
+          /p:PublishSingleFile=true
+          /p:PublishTrimmed=false
+          /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Package artifact
+        id: package
+        shell: pwsh
+        run: |
+          $artifactName = "taskflow-win-x64-${{ steps.version.outputs.version }}"
+          $zipPath = ".\artifacts\$artifactName.zip"
+          Compress-Archive -Path .\artifacts\publish\* -DestinationPath $zipPath -Force
+          "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "artifact_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ steps.package.outputs.artifact_path }}
+          if-no-files-found: error
