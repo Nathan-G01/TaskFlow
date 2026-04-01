@@ -3,11 +3,14 @@ using TaskFlow.Agents.Logging;
 using TaskFlow.Agents.Models;
 using TaskFlow.Providers.Abstraction.Core;
 using TaskFlow.Providers.Abstraction.Protocol;
+using System.Diagnostics;
 
 namespace TaskFlow.Agents.Orchestration;
 
 public sealed class Orchestrator : IOrchestrator
 {
+    private static readonly TimeSpan OperationHeartbeatInterval = TimeSpan.FromSeconds(15);
+
     private readonly ISupervisor _supervisor;
     private readonly IRunContextStore _runContextStore;
     private readonly IAgentFactory _agentFactory;
@@ -36,7 +39,16 @@ public sealed class Orchestrator : IOrchestrator
             SupervisorTaskDecision decision;
             try
             {
-                decision = await _supervisor.CreateNextTaskAsync(context, cancellationToken);
+                var createNextTask = await ObserveOperationAsync(
+                    operation: token => _supervisor.CreateNextTaskAsync(context, token),
+                    startEventType: "supervisor-create-start",
+                    startMessage: "Supervisor is creating the next task.",
+                    runningEventType: "supervisor-create-running",
+                    runningMessageFactory: elapsed => $"Supervisor is still creating the next task. Elapsed: {FormatElapsed(elapsed)}.",
+                    taskId: null,
+                    status: "Running",
+                    cancellationToken: cancellationToken);
+                decision = createNextTask.Result;
             }
             catch (ProviderProtocolException exception)
             {
@@ -60,8 +72,23 @@ public sealed class Orchestrator : IOrchestrator
 
             try
             {
-                result = await GetAgent().ExecuteAsync(assignment, cancellationToken);
-                await LogAsync(TaskLogLevel.Information, "task-completed", result.Summary, assignment.Id, result.Status.ToString(), cancellationToken);
+                var execution = await ObserveOperationAsync(
+                    operation: token => GetAgent().ExecuteAsync(assignment, token),
+                    startEventType: "task-execution-start",
+                    startMessage: $"Agent started task '{assignment.Title}'.",
+                    runningEventType: "task-execution-running",
+                    runningMessageFactory: elapsed => $"Agent is still running task '{assignment.Title}'. Elapsed: {FormatElapsed(elapsed)}.",
+                    taskId: assignment.Id,
+                    status: "Running",
+                    cancellationToken: cancellationToken);
+                result = execution.Result;
+                await LogAsync(
+                    TaskLogLevel.Information,
+                    "task-completed",
+                    $"{result.Summary} Duration: {FormatElapsed(execution.Elapsed)}",
+                    assignment.Id,
+                    result.Status.ToString(),
+                    cancellationToken);
             }
             catch (ProviderProtocolException exception)
             {
@@ -77,7 +104,23 @@ public sealed class Orchestrator : IOrchestrator
 
             try
             {
-                review = await _supervisor.ReviewTaskAsync(context, assignment, result, cancellationToken);
+                var reviewOperation = await ObserveOperationAsync(
+                    operation: token => _supervisor.ReviewTaskAsync(context, assignment, result, token),
+                    startEventType: "task-review-start",
+                    startMessage: $"Supervisor started reviewing task '{assignment.Title}'.",
+                    runningEventType: "task-review-running",
+                    runningMessageFactory: elapsed => $"Supervisor is still reviewing task '{assignment.Title}'. Elapsed: {FormatElapsed(elapsed)}.",
+                    taskId: assignment.Id,
+                    status: "Running",
+                    cancellationToken: cancellationToken);
+                review = reviewOperation.Result;
+                await LogAsync(
+                    TaskLogLevel.Information,
+                    "task-reviewed",
+                    $"{review.Summary} Review duration: {FormatElapsed(reviewOperation.Elapsed)}",
+                    assignment.Id,
+                    review.Status.ToString(),
+                    cancellationToken);
             }
             catch (ProviderProtocolException exception)
             {
@@ -85,8 +128,6 @@ public sealed class Orchestrator : IOrchestrator
                 await LogAsync(TaskLogLevel.Error, "task-reviewed", review.Summary, assignment.Id, review.Status.ToString(), cancellationToken);
                 goto PersistReviewedTask;
             }
-
-            await LogAsync(TaskLogLevel.Information, "task-reviewed", review.Summary, assignment.Id, review.Status.ToString(), cancellationToken);
 
         PersistReviewedTask:
             var entry = new TaskHistoryEntry(
@@ -127,4 +168,48 @@ public sealed class Orchestrator : IOrchestrator
         string? status = null,
         CancellationToken cancellationToken = default) =>
         _logger.LogAsync(new TaskLogEntry(DateTimeOffset.UtcNow, level, eventType, message, taskId, status), cancellationToken);
+
+    private async ValueTask<(T Result, TimeSpan Elapsed)> ObserveOperationAsync<T>(
+        Func<CancellationToken, ValueTask<T>> operation,
+        string startEventType,
+        string startMessage,
+        string runningEventType,
+        Func<TimeSpan, string> runningMessageFactory,
+        Guid? taskId,
+        string? status,
+        CancellationToken cancellationToken)
+    {
+        await LogAsync(TaskLogLevel.Information, startEventType, startMessage, taskId, status, cancellationToken);
+
+        var stopwatch = Stopwatch.StartNew();
+        var pending = operation(cancellationToken).AsTask();
+
+        while (!pending.IsCompleted)
+        {
+            var delayTask = Task.Delay(OperationHeartbeatInterval, cancellationToken);
+            var completed = await Task.WhenAny(pending, delayTask);
+            if (completed == pending)
+            {
+                break;
+            }
+
+            await LogAsync(
+                TaskLogLevel.Information,
+                runningEventType,
+                runningMessageFactory(stopwatch.Elapsed),
+                taskId,
+                status,
+                cancellationToken);
+        }
+
+        var result = await pending;
+        stopwatch.Stop();
+
+        return (result, stopwatch.Elapsed);
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed) =>
+        elapsed.TotalHours >= 1
+            ? elapsed.ToString(@"hh\:mm\:ss")
+            : elapsed.ToString(@"mm\:ss");
 }
