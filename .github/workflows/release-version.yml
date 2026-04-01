@@ -1,34 +1,49 @@
 name: release-version
 
 on:
-  push:
-    branches:
-      - 'releases/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  publish-windows-artifact:
+  release:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
-      - name: Resolve release version
+      - name: Resolve version from Directory.Build.props
         id: version
         shell: pwsh
         run: |
-          $branchName = '${{ github.ref_name }}'
-          if ($branchName -notmatch '^releases/(?<version>v?\d+\.\d+\.\d+)$') {
-            throw "Release branches must be named releases/<semver> or releases/v<semver>. Current branch: $branchName"
+          [xml]$props = Get-Content .\Directory.Build.props
+          $version = $props.Project.PropertyGroup.VersionPrefix
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "VersionPrefix was not found in Directory.Build.props."
           }
 
-          $version = $Matches.version.TrimStart('v')
+          $tag = "v$version"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Fail if tag already exists
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          if (git rev-parse $tag 2>$null) {
+            throw "Tag '$tag' already exists. Update Directory.Build.props before dispatching a new release."
+          }
 
       - name: Restore
         run: dotnet restore TaskFlow.slnx
@@ -36,8 +51,26 @@ jobs:
       - name: Build
         run: dotnet build TaskFlow.slnx -c Release --no-restore /p:Version=${{ steps.version.outputs.version }}
 
-      - name: Publish CLI
+      - name: Discover test projects
+        id: tests
         shell: pwsh
+        run: |
+          $projects = Get-ChildItem -Recurse -File -Filter *.csproj |
+            Where-Object { $_.BaseName -match 'Test|Tests' } |
+            Select-Object -ExpandProperty FullName
+
+          if ($projects.Count -eq 0) {
+            "has_tests=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            return
+          }
+
+          "has_tests=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Run tests
+        if: steps.tests.outputs.has_tests == 'true'
+        run: dotnet test TaskFlow.slnx -c Release --no-build
+
+      - name: Publish CLI
         run: >
           dotnet publish .\src\TaskFlow.Cli\TaskFlow.Cli.csproj
           -c Release
@@ -49,19 +82,29 @@ jobs:
           /p:PublishTrimmed=false
           /p:Version=${{ steps.version.outputs.version }}
 
-      - name: Package artifact
+      - name: Package release artifact
         id: package
         shell: pwsh
         run: |
-          $artifactName = "taskflow-win-x64-${{ steps.version.outputs.version }}"
+          $artifactName = "TaskFlow-win-x64-${{ steps.version.outputs.version }}"
           $zipPath = ".\artifacts\$artifactName.zip"
           Compress-Archive -Path .\artifacts\publish\* -DestinationPath $zipPath -Force
           "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "artifact_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Create tag
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag $tag
+          git push origin $tag
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
         with:
-          name: ${{ steps.package.outputs.artifact_name }}
-          path: ${{ steps.package.outputs.artifact_path }}
-          if-no-files-found: error
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: main
+          generate_release_notes: true
+          files: ${{ steps.package.outputs.artifact_path }}
