@@ -41,7 +41,8 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
-          if (git rev-parse $tag 2>$null) {
+          git fetch --tags --force
+          if (git show-ref --verify --quiet "refs/tags/$tag") {
             throw "Tag '$tag' already exists. Update Directory.Build.props before dispatching a new release."
           }
 
